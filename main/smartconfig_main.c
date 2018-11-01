@@ -1,126 +1,98 @@
-/* Esptouch example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+/* Factory模式
+ * 用于初始化用户设置和配置网络，并更新至用户分区
+ * */
 
 #include <string.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-#include "esp_wifi.h"
+#include "freertos/queue.h"
 #include "esp_wpa2.h"
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "tcpip_adapter.h"
-#include "esp_smartconfig.h"
+#include "nvs.h"
+#include "wifi_cfg.h"
+#include "led.h"
 
-/* FreeRTOS event group to signal when we are connected & ready to make a request */
-static EventGroupHandle_t wifi_event_group;
 
-/* The event group allows multiple bits for each event,
-   but we only care about one event - are we connected
-   to the AP with an IP? */
-static const int CONNECTED_BIT = BIT0;
-static const int ESPTOUCH_DONE_BIT = BIT1;
-static const char *TAG = "sc";
 
-void smartconfig_example_task(void * parm);
-
-static esp_err_t event_handler(void *ctx, system_event_t *event)
-{
-    switch(event->event_id) {
-    case SYSTEM_EVENT_STA_START:
-        xTaskCreate(smartconfig_example_task, "smartconfig_example_task", 4096, NULL, 3, NULL);
-        break;
-    case SYSTEM_EVENT_STA_GOT_IP:
-        xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-        break;
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-        esp_wifi_connect();
-        xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
-        break;
-    default:
-        break;
-    }
-    return ESP_OK;
-}
-
-static void initialise_wifi(void)
-{
-    tcpip_adapter_init();
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK( esp_wifi_start() );
-}
-
-static void sc_callback(smartconfig_status_t status, void *pdata)
-{
-    switch (status) {
-        case SC_STATUS_WAIT:
-            ESP_LOGI(TAG, "SC_STATUS_WAIT");
-            break;
-        case SC_STATUS_FIND_CHANNEL:
-            ESP_LOGI(TAG, "SC_STATUS_FINDING_CHANNEL");
-            break;
-        case SC_STATUS_GETTING_SSID_PSWD:
-            ESP_LOGI(TAG, "SC_STATUS_GETTING_SSID_PSWD");
-            break;
-        case SC_STATUS_LINK:
-            ESP_LOGI(TAG, "SC_STATUS_LINK");
-            wifi_config_t *wifi_config = pdata;
-            ESP_LOGI(TAG, "SSID:%s", wifi_config->sta.ssid);
-            ESP_LOGI(TAG, "PASSWORD:%s", wifi_config->sta.password);
-            ESP_ERROR_CHECK( esp_wifi_disconnect() );
-            ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, wifi_config) );
-            ESP_ERROR_CHECK( esp_wifi_connect() );
-            break;
-        case SC_STATUS_LINK_OVER:
-            ESP_LOGI(TAG, "SC_STATUS_LINK_OVER");
-            if (pdata != NULL) {
-                uint8_t phone_ip[4] = { 0 };
-                memcpy(phone_ip, (uint8_t* )pdata, 4);
-                ESP_LOGI(TAG, "Phone ip: %d.%d.%d.%d\n", phone_ip[0], phone_ip[1], phone_ip[2], phone_ip[3]);
-            }
-            xEventGroupSetBits(wifi_event_group, ESPTOUCH_DONE_BIT);
-            break;
-        default:
-            break;
-    }
-}
-
-void smartconfig_example_task(void * parm)
-{
-    EventBits_t uxBits;
-    ESP_ERROR_CHECK( esp_smartconfig_set_type(SC_TYPE_ESPTOUCH) );
-    ESP_ERROR_CHECK( esp_smartconfig_start(sc_callback) );
-    while (1) {
-        uxBits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT | ESPTOUCH_DONE_BIT, true, false, portMAX_DELAY); 
-        if(uxBits & CONNECTED_BIT) {
-            ESP_LOGI(TAG, "WiFi Connected to ap");
-        }
-        if(uxBits & ESPTOUCH_DONE_BIT) {
-            ESP_LOGI(TAG, "smartconfig over");
-            esp_smartconfig_stop();
-            vTaskDelete(NULL);
-        }
-    }
-}
+static const char *MAIN_TAG = "main";
+extern EventGroupHandle_t wifi_event_group;
+QueueHandle_t phoneIP_queue;
 
 void app_main()
 {
-    ESP_ERROR_CHECK( nvs_flash_init() );
-    initialise_wifi();
+    // 初始化 NVS，并存储重启次数
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+    	ESP_LOGE(MAIN_TAG,"ESP_ERR_NVS_NO_FREE_PAGES");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( err );
+    nvs_handle NVS_handle;
+    err = nvs_open("user_data", NVS_READWRITE, &NVS_handle);
+    if(err != ESP_OK){
+    	ESP_LOGE(MAIN_TAG,"Error (%d) opening NVS handle!\n", err);
+    }else{
+    	uint32_t restart_counter = 0; // value will default to 0, if not set yet in NVS
+		err = nvs_get_u32(NVS_handle, "restart_counter", &restart_counter);
+		switch (err) {
+			case ESP_OK:
+				ESP_LOGI(MAIN_TAG,"Restart counter = %d\n", restart_counter);
+				break;
+			case ESP_ERR_NVS_NOT_FOUND:
+				ESP_LOGI(MAIN_TAG,"The value is not initialized yet!\n");
+				break;
+			default :
+				ESP_LOGW(MAIN_TAG,"Error (%d) reading!\n", err);
+		}
+		// Write
+		ESP_LOGI(MAIN_TAG,"Updating restart counter in NVS ... ");
+		restart_counter++;
+		err = nvs_set_u32(NVS_handle, "restart_counter", restart_counter);
+		if (err != ESP_OK){
+			ESP_LOGW(MAIN_TAG,"Error set restart_counter!\n");
+		}else{
+			ESP_LOGI(MAIN_TAG,"set restart_counter ok.\n");
+		}
+
+		// Commit written value.
+		// After setting any values, nvs_commit() must be called to ensure changes are written
+		// to flash storage. Implementations may write to storage at other times,
+		// but this is not guaranteed.
+		ESP_LOGI(MAIN_TAG,"Committing updates in NVS ... ");
+		err = nvs_commit(NVS_handle);
+		if (err != ESP_OK){
+			ESP_LOGW(MAIN_TAG,"Error commit restart_counter!\n");
+		}else{
+			ESP_LOGI(MAIN_TAG,"commit OK!");
+		}
+    }
+    phoneIP_queue = xQueueGenericCreate(4,1,queueQUEUE_TYPE_BASE);	//消息队列来获取手机IP
+    init_wifi();
+    uint8_t phone_ip[4] = { 0 };
+    for(int i=0;i<4;i++){
+    	xQueueReceive(phoneIP_queue,(phone_ip+i),portMAX_DELAY);
+    	printf("%d",phone_ip[i]);
+    }
+
+
+
+
+
+
+
+	nvs_close(NVS_handle);
+
 }
+
+
+
 

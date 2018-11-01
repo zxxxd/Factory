@@ -1,0 +1,9 @@
+eclipse.preferences.version=1
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/ADF_PATH/delimiter=\:
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/ADF_PATH/operation=append
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/ADF_PATH/value=/home/zxd/esp32-A1S/esp-adf
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/BATCH_BUILD/delimiter=\:
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/BATCH_BUILD/operation=append
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/BATCH_BUILD/value=1
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/append=true
+environment/project/cdt.managedbuild.toolchain.gnu.cross.base.1613201984/appendContributed=true
