@@ -68,28 +68,44 @@ void led_task(void * pvParameters)
     io_conf.pull_up_en=0;
     gpio_config(&io_conf);
     ESP_LOGI(led_TAG,"LED start");
-    //io_conf.mode=GPIO_MODE_DEF_DISABLE;
-    //io_conf.pin_bit_mask=(1ULL<<14);
-    //ESP_ERROR_CHECK(gpio_config(&io_conf));
+    ledc_stop(LEDC_LS_MODE,LEDC_LS_CH0_CHANNEL,1);		//点亮led
+
+    /****  等待smart config启动  *****/
+    xEventGroupWaitBits(wifi_event_group,SC_START,pdTRUE,pdTRUE,portMAX_DELAY);		//等待smart config启动
+    ESP_ERROR_CHECK(ledc_fade_func_install(0));		//注册呼吸灯
+    int led_cycle = 0;
+    while(1){
+    	system_state = xEventGroupGetBits(wifi_event_group);
+    	if(((system_state & SC_LINK_OVER) == SC_LINK_OVER) || ((system_state & GOT_IP) == GOT_IP)){
+    		break;
+    	}
+    	if(led_cycle == 0){
+    		led_cycle = 18;
+    		ESP_ERROR_CHECK(ledc_set_fade_with_time(ledc_channel.speed_mode,
+												ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME));
+    		ESP_ERROR_CHECK(ledc_fade_start(ledc_channel.speed_mode,
+												ledc_channel.channel, LEDC_FADE_NO_WAIT ));
+    	}else if(led_cycle == 9){
+    		ESP_ERROR_CHECK(ledc_set_fade_with_time(ledc_channel.speed_mode,
+												ledc_channel.channel, 0, LEDC_TEST_FADE_TIME));
+    		ESP_ERROR_CHECK(ledc_fade_start(ledc_channel.speed_mode,
+												ledc_channel.channel, LEDC_FADE_NO_WAIT ));
+    	}
+    	vTaskDelay(100 / portTICK_PERIOD_MS);
+    	led_cycle--;
+    }
+    ledc_fade_func_uninstall();
+    /***********  连接完成后快速闪烁5次  ************/
+    for (int i=0;i<5;i++){
+		ledc_stop(LEDC_LS_MODE,LEDC_LS_CH0_CHANNEL,1);
+		vTaskDelay(200 / portTICK_PERIOD_MS);
+		ledc_stop(LEDC_LS_MODE,LEDC_LS_CH0_CHANNEL,0);
+		vTaskDelay(200 / portTICK_PERIOD_MS);
+	}
 
 	while (1)
 	{
 		ESP_LOGI(led_TAG,"LED RUN");
-
-		/******  下面的是呼吸模式  ******/
-		ESP_ERROR_CHECK(ledc_fade_func_install(0));
-		ESP_ERROR_CHECK(ledc_set_fade_with_time(ledc_channel.speed_mode,
-											ledc_channel.channel, LEDC_TEST_DUTY, LEDC_TEST_FADE_TIME));
-		ESP_ERROR_CHECK(ledc_fade_start(ledc_channel.speed_mode,
-											ledc_channel.channel, LEDC_FADE_NO_WAIT ));
-		vTaskDelay(800 / portTICK_PERIOD_MS);
-		ESP_ERROR_CHECK(ledc_set_fade_with_time(ledc_channel.speed_mode,
-								            ledc_channel.channel, 0, LEDC_TEST_FADE_TIME));
-		ESP_ERROR_CHECK(ledc_fade_start(ledc_channel.speed_mode,
-								            ledc_channel.channel, LEDC_FADE_NO_WAIT ));
-		vTaskDelay(800 / portTICK_PERIOD_MS);
-		ledc_fade_func_uninstall();
-
 		/*********  下面是高低电平闪烁模式  ***********/
 		for (int i=0;i<5;i++){
 			ledc_stop(LEDC_LS_MODE,LEDC_LS_CH0_CHANNEL,1);
@@ -97,18 +113,6 @@ void led_task(void * pvParameters)
 			ledc_stop(LEDC_LS_MODE,LEDC_LS_CH0_CHANNEL,0);
 			vTaskDelay(2000 / portTICK_PERIOD_MS);
 		}
-
-
-		/*ESP_ERROR_CHECK(gpio_config(&io_conf));
-		ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_14,1));
-		vTaskDelay(800 / portTICK_PERIOD_MS);
-		gpio_set_level(GPIO_NUM_14,0);
-		vTaskDelay(800 / portTICK_PERIOD_MS);
-		gpio_set_level(GPIO_NUM_14,1);
-				vTaskDelay(800 / portTICK_PERIOD_MS);
-				gpio_set_level(GPIO_NUM_14,0);
-				vTaskDelay(800 / portTICK_PERIOD_MS);*/
-
 	}
 	vTaskDelete(NULL);
 

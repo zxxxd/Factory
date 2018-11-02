@@ -38,8 +38,10 @@ void init_wifi(){
 	/**
 	 * 初始化wifi并进入smart config模式
 	 */
+
 	tcpip_adapter_init();
 	wifi_event_group = xEventGroupCreate();
+	xEventGroupSetBits(wifi_event_group, WIFI_INIT);
 	xTaskCreate(led_task,"led task",2048,NULL,3,NULL);
 	ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
 
@@ -73,7 +75,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
     switch(event->event_id) {
     case SYSTEM_EVENT_STA_START:
-    	xEventGroupSetBits(wifi_event_group, WIFI_INIT);
         xTaskCreate(smart_cfg_task, "smartconfig_example_task", 4096, NULL, 3, NULL);
         break;
     case SYSTEM_EVENT_STA_GOT_IP:
@@ -101,9 +102,11 @@ static void sc_callback(smartconfig_status_t status, void *pdata)
             break;
         case SC_STATUS_FIND_CHANNEL:
             ESP_LOGI(wifi_TAG, "SC_STATUS_FINDING_CHANNEL");
+            xEventGroupSetBits(wifi_event_group, SC_START);
             break;
         case SC_STATUS_GETTING_SSID_PSWD:
             ESP_LOGI(wifi_TAG, "SC_STATUS_GETTING_SSID_PSWD");
+            xEventGroupSetBits(wifi_event_group, SC_GET_WIFIID_PWD);
             break;
         case SC_STATUS_LINK:
             ESP_LOGI(wifi_TAG, "SC_STATUS_LINK");
@@ -116,6 +119,7 @@ static void sc_callback(smartconfig_status_t status, void *pdata)
             break;
         case SC_STATUS_LINK_OVER:
             ESP_LOGI(wifi_TAG, "SC_STATUS_LINK_OVER");
+            xEventGroupSetBits(wifi_event_group, SC_LINK_OVER);
             if (pdata != NULL) {
                 uint8_t phone_ip[4] = { 0 };
                 memcpy(phone_ip, (uint8_t* )pdata, 4);

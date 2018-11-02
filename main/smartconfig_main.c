@@ -17,7 +17,7 @@
 #include "nvs.h"
 #include "wifi_cfg.h"
 #include "led.h"
-
+#include "phone_socket.h"
 
 
 static const char *MAIN_TAG = "main";
@@ -77,17 +77,11 @@ void app_main()
     }
     phoneIP_queue = xQueueGenericCreate(4,1,queueQUEUE_TYPE_BASE);	//消息队列来获取手机IP
     init_wifi();
-    uint8_t phone_ip[4] = { 0 };
-    for(int i=0;i<4;i++){
-    	xQueueReceive(phoneIP_queue,(phone_ip+i),portMAX_DELAY);
-    	printf("%d",phone_ip[i]);
+    xTaskCreate(get_userID, "get_userID_from_phone", 4096, NULL, 1, NULL);
+    while(1)
+    {
+    	vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-
-
-
-
-
-
 
 	nvs_close(NVS_handle);
 
